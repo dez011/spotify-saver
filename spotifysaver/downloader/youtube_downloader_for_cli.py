@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from typing import Optional
+import re
 
 from spotifysaver.services import YoutubeMusicSearcher, LrclibAPI
 from spotifysaver.metadata import NFOGenerator
@@ -39,10 +40,108 @@ class YouTubeDownloaderForCLI(YouTubeDownloader):
         self.image_downloader = ImageDownloader()
 
 
+    def _normalize_match_text(self, value: str) -> str:
+        value = str(value or "").lower()
+        value = re.sub(r"\([^)]*\)|\[[^]]*]", "", value)
+        value = re.sub(r"[^a-z0-9]+", " ", value)
+        return " ".join(value.split())
+
+    def _audio_files_under(self, output_dir: Path):
+        audio_extensions = {".m4a", ".mp3", ".flac", ".opus", ".ogg", ".aac", ".wav"}
+        for file_path in output_dir.rglob("*"):
+            if file_path.is_file() and file_path.suffix.lower() in audio_extensions:
+                yield file_path
+
+    def _read_audio_tags_for_match(self, file_path: Path) -> tuple[str, str]:
+        try:
+            from mutagen import File as MutagenFile
+
+            audio = MutagenFile(file_path, easy=True)
+            if not audio or not audio.tags:
+                return "", ""
+
+            title_values = audio.tags.get("title", [])
+            artist_values = audio.tags.get("artist", []) or audio.tags.get("albumartist", [])
+
+            title = title_values[0] if title_values else ""
+            artist = artist_values[0] if artist_values else ""
+            return str(title), str(artist)
+        except Exception:
+            return "", ""
+
+    def _audio_file_looks_complete(self, file_path: Path, track: Track) -> bool:
+        if not file_path.exists() or not file_path.is_file():
+            return False
+
+        # Tiny files are almost always failed/partial downloads.
+        if file_path.stat().st_size <= 100_000:
+            return False
+
+        expected_duration = getattr(track, "duration", None)
+        if not expected_duration:
+            return True
+
+        try:
+            from mutagen import File as MutagenFile
+
+            audio = MutagenFile(file_path)
+            actual_duration = getattr(getattr(audio, "info", None), "length", None)
+            if not actual_duration:
+                return False
+
+            # Allow normal source differences/intros/outros, but reject obvious partial files.
+            return abs(float(actual_duration) - float(expected_duration)) <= 15
+        except Exception:
+            return False
+
+    def _find_existing_playlist_track_by_metadata(
+        self,
+        output_dir: Path,
+        track: Track,
+        skipped_tracks_to_review: list[Track],
+    ) -> Optional[Path]:
+        expected_title = self._normalize_match_text(track.name)
+        expected_artists = [self._normalize_match_text(artist) for artist in (track.artists or [])]
+
+        fallback_filename_match = None
+
+        for file_path in self._audio_files_under(output_dir):
+            if not self._audio_file_looks_complete(file_path, track):
+                skipped_tracks_to_review.append(track)
+                continue
+
+            tag_title, tag_artist = self._read_audio_tags_for_match(file_path)
+            normalized_tag_title = self._normalize_match_text(tag_title)
+            normalized_tag_artist = self._normalize_match_text(tag_artist)
+
+            title_matches = normalized_tag_title == expected_title
+            artist_matches = not expected_artists or any(
+                artist and artist in normalized_tag_artist for artist in expected_artists
+            )
+
+            if title_matches and artist_matches:
+                if file_path.stem.lower() != self._sanitize_filename(track.name).lower():
+                    skipped_tracks_to_review.append(track)
+                return file_path
+
+            if title_matches and not artist_matches:
+                skipped_tracks_to_review.append(track)
+
+            normalized_file_stem = self._normalize_match_text(file_path.stem)
+            if expected_title and expected_title in normalized_file_stem:
+                fallback_filename_match = fallback_filename_match or file_path
+
+        if fallback_filename_match:
+            skipped_tracks_to_review.append(track)
+            return fallback_filename_match
+
+        return None
+
+
     def download_track_cli(
-        self, 
-        track: Track, 
-        output_format: AudioFormat = AudioFormat.M4A, 
+        self,
+        track: Track,
+        output_format: AudioFormat = AudioFormat.M4A,
         bitrate: Bitrate = Bitrate.B128,
         album_artist: str = None,
         download_lyrics: bool = False,
@@ -57,7 +156,7 @@ class YouTubeDownloaderForCLI(YouTubeDownloader):
             bitrate: Audio bitrate enum
             album_artist: Artist name for file organization
             download_lyrics: Whether to download lyrics
-            progress_callback: Optional function for progress reporting. 
+            progress_callback: Optional function for progress reporting.
                             Example: lambda idx, total, name: print(f"{idx}/{total} {name}")
 
         Returns:
@@ -184,15 +283,30 @@ class YouTubeDownloaderForCLI(YouTubeDownloader):
         output_dir = self.base_dir / playlist.name
         output_dir.mkdir(parents=True, exist_ok=True)
         success = 0
+        skipped_tracks_to_review = []
 
         for idx, track in enumerate(playlist.tracks, 1):
             try:
-                # Notificar progreso (si hay callback)
+
+                existing_file = self._find_existing_playlist_track_by_metadata(
+                    output_dir=output_dir,
+                    track=track,
+                    skipped_tracks_to_review=skipped_tracks_to_review,
+                )
+
+                if existing_file:
+                    if progress_callback:
+                        progress_callback(idx, len(playlist.tracks), track.name)
+                    self.logger.info(f"Skipping existing track: {existing_file.name}")
+                    success += 1
+                    continue
+
                 if progress_callback:
                     progress_callback(idx, len(playlist.tracks), track.name)
 
                 _, updated_track = self.download_track(
                     track,
+                    album_artist=playlist.name,
                     output_format=output_format,
                     bitrate=bitrate,
                     download_lyrics=download_lyrics,
@@ -201,6 +315,23 @@ class YouTubeDownloaderForCLI(YouTubeDownloader):
                     success += 1
             except Exception as e:
                 self.logger.error(f"Error en {track.name}: {str(e)}")
+
+        if skipped_tracks_to_review:
+            force_download_report_path = output_dir / "tracks_to_force_download_later.txt"
+            unique_tracks = []
+            seen_uris = set()
+
+            for skipped_track in skipped_tracks_to_review:
+                track_uri = getattr(skipped_track, "uri", None) or repr(skipped_track)
+                if track_uri in seen_uris:
+                    continue
+                seen_uris.add(track_uri)
+                unique_tracks.append(skipped_track)
+
+            force_download_report_path.write_text(
+                "\n".join(repr(skipped_track) for skipped_track in unique_tracks)
+            )
+            self.logger.info(f"Wrote force-download track report: {force_download_report_path}")
 
         if success > 0 and cover and playlist.cover_url:
             try:
