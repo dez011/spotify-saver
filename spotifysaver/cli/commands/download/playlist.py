@@ -9,18 +9,8 @@ from spotifysaver.downloader import YouTubeDownloader, YouTubeDownloaderForCLI
 from spotifysaver.services import SpotifyAPI, YoutubeMusicSearcher, ScoreMatchCalculator
 
 
-def process_playlist(
-        spotify: SpotifyAPI, 
-        searcher: YoutubeMusicSearcher, 
-        downloader: YouTubeDownloaderForCLI, 
-        url, 
-        lyrics, 
-        nfo, 
-        cover, 
-        output_format, 
-        bitrate,
-        dry_run=False
-        ):
+def process_playlist(spotify: SpotifyAPI, searcher: YoutubeMusicSearcher, downloader: YouTubeDownloaderForCLI, url,
+                     lyrics, nfo, cover, output_format, bitrate, names, dry_run=False, skip_playlist_names=None):
     """Process and download a complete Spotify playlist with progress tracking.
     
     Downloads all tracks from a Spotify playlist, showing a progress bar and
@@ -28,6 +18,8 @@ def process_playlist(
     playlists is currently in development.
     
     Args:
+        names:
+        skip_playlist_names:
         spotify: SpotifyAPI instance for fetching playlist data
         searcher: YoutubeMusicSearcher for finding YouTube matches
         downloader: YouTubeDownloader for downloading and processing files
@@ -37,8 +29,15 @@ def process_playlist(
         cover: Whether to download playlist cover art
         output_format: Audio format for downloaded files
     """
+    if skip_playlist_names is None:
+        skip_playlist_names = []
+
     playlist = spotify.get_playlist(url)
     click.secho(f"\nDownloading playlist: {playlist.name}", fg="magenta")
+
+    if playlist.name in skip_playlist_names:
+        click.secho(f"\nSkipping playlist by exact name match: {playlist.name}", fg="cyan")
+        return
 
     # Dry run mode: explain matches without downloading
     if dry_run:

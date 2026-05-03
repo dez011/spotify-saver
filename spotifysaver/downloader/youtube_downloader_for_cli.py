@@ -104,10 +104,15 @@ class YouTubeDownloaderForCLI(YouTubeDownloader):
         expected_artists = [self._normalize_match_text(artist) for artist in (track.artists or [])]
 
         fallback_filename_match = None
+        incomplete_filename_match = None
 
         for file_path in self._audio_files_under(output_dir):
+            normalized_file_stem = self._normalize_match_text(file_path.stem)
+            filename_title_matches = expected_title and expected_title in normalized_file_stem
+
             if not self._audio_file_looks_complete(file_path, track):
-                skipped_tracks_to_review.append(track)
+                if filename_title_matches:
+                    incomplete_filename_match = incomplete_filename_match or file_path
                 continue
 
             tag_title, tag_artist = self._read_audio_tags_for_match(file_path)
@@ -127,15 +132,13 @@ class YouTubeDownloaderForCLI(YouTubeDownloader):
             if title_matches and not artist_matches:
                 skipped_tracks_to_review.append(track)
 
-            normalized_file_stem = self._normalize_match_text(file_path.stem)
-            if expected_title and expected_title in normalized_file_stem:
+            if filename_title_matches:
                 fallback_filename_match = fallback_filename_match or file_path
 
-        if fallback_filename_match:
+        if incomplete_filename_match:
             skipped_tracks_to_review.append(track)
-            return fallback_filename_match
-
-        return None
+            print(f"Re-downloading incomplete existing file: {track.name} -> {incomplete_filename_match}")
+            return None
 
 
     def download_track_cli(
@@ -295,8 +298,7 @@ class YouTubeDownloaderForCLI(YouTubeDownloader):
                 )
 
                 if existing_file:
-                    if progress_callback:
-                        progress_callback(idx, len(playlist.tracks), track.name)
+                    print(f"Skip: {track.name}")
                     self.logger.info(f"Skipping existing track: {existing_file.name}")
                     success += 1
                     continue

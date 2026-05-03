@@ -17,13 +17,24 @@ def run_programmatically():
     spotify_url = "https://open.spotify.com/playlist/3eA5dShYiEIkczx6jyGsHA?si=a35d0623174c4ab8"
 
     output_dir = "./musicTest"
+    skip_playlists = [
 
+        # "SomeOldPlaylist",
+
+        # "Another Playlist",
+        # "MyLikedSongs"
+    ]
     extra_args = [
         "--output", output_dir,
         spotify_url,
         # "--format", "mp3",
         # "--quality", "320",
     ]
+
+    for playlist_name in skip_playlists:
+
+        extra_args.extend(["--skip-playlist", playlist_name])
+
     # ===========================
 
     # Simulate CLI call

@@ -29,6 +29,12 @@ from spotifysaver.cli.commands.download.track import process_track
 @click.option("--verbose", is_flag=True, help="Show debug output")
 @click.option("--explain", is_flag=True, help="Show score breakdown for each track without downloading (for error analysis)")
 @click.option("--dry-run", is_flag=True, help="Simulate download without saving files")
+@click.option(
+    "--skip-playlist",
+    "skip_playlist_names",
+    multiple=True,
+    help="Playlist/folder name to ignore when checking existing downloaded files. Can be used multiple times.",
+)
 
 def download(
     spotify_url: str,
@@ -41,6 +47,7 @@ def download(
     verbose: bool,
     explain: bool,
     dry_run: bool,
+    skip_playlist_names,
 ):
     """Download music from Spotify URLs via YouTube Music with metadata.
     
@@ -72,7 +79,7 @@ def download(
             )
         elif "playlist" in spotify_url:
             process_playlist(
-                spotify, searcher, downloader, spotify_url, lyrics, nfo, cover, format, bitrate, dry_run
+                spotify, searcher, downloader, spotify_url, lyrics, nfo, cover, format, bitrate, dry_run, skip_playlist_names
             )
         else:
             process_track(spotify, searcher, downloader, spotify_url, lyrics, format, bitrate, explain, dry_run)
