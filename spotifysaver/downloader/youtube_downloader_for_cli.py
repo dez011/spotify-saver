@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Optional
 import re
 
+from spotifysaver.cli.commands.download import customOptions
 from spotifysaver.services import YoutubeMusicSearcher, LrclibAPI
 from spotifysaver.metadata import NFOGenerator
 from spotifysaver.downloader.youtube_downloader import YouTubeDownloader
@@ -264,10 +265,12 @@ class YouTubeDownloaderForCLI(YouTubeDownloader):
         download_lyrics: bool = False,
         cover: bool = False,
         progress_callback: Optional[callable] = None,
+        custom_options = None
     ) -> tuple[int, int]:
         """Download a complete playlist with progress bar support.
 
         Args:
+            custom_options:
             playlist: Playlist object to download
             output_format: Audio format enum
             bitrate: Audio bitrate enum
@@ -290,12 +293,16 @@ class YouTubeDownloaderForCLI(YouTubeDownloader):
 
         for idx, track in enumerate(playlist.tracks, 1):
             try:
-
-                existing_file = self._find_existing_playlist_track_by_metadata(
-                    output_dir=output_dir,
-                    track=track,
-                    skipped_tracks_to_review=skipped_tracks_to_review,
-                )
+                override_force = custom_options.get(customOptions.OPTION_OVERWRITE, False)
+                existing_file = None
+                if override_force:
+                    existing_file = False
+                else:
+                    existing_file = self._find_existing_playlist_track_by_metadata(
+                        output_dir=output_dir,
+                        track=track,
+                        skipped_tracks_to_review=skipped_tracks_to_review,
+                    )
 
                 if existing_file:
                     print(f"Skip: {track.name}")

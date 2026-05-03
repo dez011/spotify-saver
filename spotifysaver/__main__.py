@@ -3,7 +3,7 @@ This module serves as the entry point for the SpotifySaver command-line interfac
 """
 
 from spotifysaver.cli import cli
-import sys
+from spotifysaver.cli.commands.download.download import run_download
 
 
 def run_programmatically():
@@ -16,31 +16,24 @@ def run_programmatically():
     command = "download"  # options: download, inspect, init, etc.
     spotify_url = "https://open.spotify.com/playlist/3eA5dShYiEIkczx6jyGsHA?si=a35d0623174c4ab8"
 
-    output_dir = "./musicTest"
-    skip_playlists = [
+    options = {
+        "output": "./musicTest",
+        "skip_playlist": {
+            "values": [
+                # "SomeOldPlaylist",
+                # "Another Playlist",
+                # "MyLikedSongs",
+            ],
+        },
+        # "format": "mp3",
+        # "quality": "320",
+        # "dry_run": True,
+        "overwrite": True,
+    }
 
-        # "SomeOldPlaylist",
 
-        # "Another Playlist",
-        # "MyLikedSongs"
-    ]
-    extra_args = [
-        "--output", output_dir,
-        spotify_url,
-        # "--format", "mp3",
-        # "--quality", "320",
-    ]
 
-    for playlist_name in skip_playlists:
-
-        extra_args.extend(["--skip-playlist", playlist_name])
-
-    # ===========================
-
-    # Simulate CLI call
-    sys.argv = ["spotify-saver", command] + extra_args
-
-    cli()
+    run_download(spotify_url, options)
 
 
 if __name__ == "__main__":

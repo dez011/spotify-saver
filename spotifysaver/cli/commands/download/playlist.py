@@ -5,21 +5,21 @@ including progress tracking and optional metadata generation.
 """
 
 import click
+
+from spotifysaver.cli.commands.download.customOptions import OPTION_SKIP_PLAYLIST, OPTION_VALUES
 from spotifysaver.downloader import YouTubeDownloader, YouTubeDownloaderForCLI
 from spotifysaver.services import SpotifyAPI, YoutubeMusicSearcher, ScoreMatchCalculator
 
 
 def process_playlist(spotify: SpotifyAPI, searcher: YoutubeMusicSearcher, downloader: YouTubeDownloaderForCLI, url,
-                     lyrics, nfo, cover, output_format, bitrate, names, dry_run=False, skip_playlist_names=None):
+                     lyrics, nfo, cover, output_format, bitrate, dry_run=False, custom_options=None):
     """Process and download a complete Spotify playlist with progress tracking.
-    
+
     Downloads all tracks from a Spotify playlist, showing a progress bar and
     handling optional features like lyrics and cover art. NFO generation for
     playlists is currently in development.
-    
+
     Args:
-        names:
-        skip_playlist_names:
         spotify: SpotifyAPI instance for fetching playlist data
         searcher: YoutubeMusicSearcher for finding YouTube matches
         downloader: YouTubeDownloader for downloading and processing files
@@ -28,9 +28,16 @@ def process_playlist(spotify: SpotifyAPI, searcher: YoutubeMusicSearcher, downlo
         nfo: Whether to generate metadata files (in development)
         cover: Whether to download playlist cover art
         output_format: Audio format for downloaded files
+        custom_options: Custom options map for playlist behavior
     """
-    if skip_playlist_names is None:
-        skip_playlist_names = []
+    if custom_options is None:
+        custom_options = {}
+
+    skip_playlist_option = custom_options.get(OPTION_SKIP_PLAYLIST, {})
+    if isinstance(skip_playlist_option, dict):
+        skip_playlist_names = skip_playlist_option.get(OPTION_VALUES, [])
+    else:
+        skip_playlist_names = skip_playlist_option or []
 
     playlist = spotify.get_playlist(url)
     click.secho(f"\nDownloading playlist: {playlist.name}", fg="magenta")
@@ -42,13 +49,33 @@ def process_playlist(spotify: SpotifyAPI, searcher: YoutubeMusicSearcher, downlo
     # Dry run mode: explain matches without downloading
     if dry_run:
         scorer = ScoreMatchCalculator()
+        output_dir = downloader.base_dir / playlist.name
         click.secho(f"\n🧪 Dry run for playlist: {playlist.name}", fg="magenta")
 
         for track in playlist.tracks:
+            skipped_tracks_to_review = []
+            existing_file = downloader._find_existing_playlist_track_by_metadata(
+                output_dir=output_dir,
+                track=track,
+                skipped_tracks_to_review=skipped_tracks_to_review,
+                skip_playlist_names=skip_playlist_names,
+            )
+
+            click.secho(f"\n🎵 Track: {track.name}", fg="yellow")
+
+            if existing_file:
+                click.secho(f"  → DRY RUN SKIP: existing valid file found", fg="cyan")
+                click.echo(f"    File: {existing_file}")
+                continue
+
+            if skipped_tracks_to_review:
+                click.secho(f"  → DRY RUN DOWNLOAD: existing match looked incomplete or needs review", fg="red")
+            else:
+                click.secho(f"  → DRY RUN DOWNLOAD: no existing valid match found", fg="green")
+
             result = searcher.search_track(track)
             explanation = scorer.explain_score(result, track, strict=True)
-            click.secho(f"\n🎵 Track: {track.name}", fg="yellow")
-            click.echo(f"  → Selected candidate: {explanation['yt_title']}")
+            click.echo(f"    Selected candidate: {explanation['yt_title']}")
             click.echo(f"    Video ID: {explanation['yt_videoId']}")
             click.echo(f"    Total score: {explanation['total_score']} (passed: {explanation['passed']})")
         return
@@ -78,6 +105,7 @@ def process_playlist(spotify: SpotifyAPI, searcher: YoutubeMusicSearcher, downlo
             bitrate=YouTubeDownloader.int_to_bitrate(bitrate),
             cover=cover,
             progress_callback=update_progress,
+            custom_options=custom_options,
         )
 
     # Display results
