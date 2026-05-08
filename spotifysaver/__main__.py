@@ -24,8 +24,8 @@ def run_programmatically():
     else:
         output_dir = "/Volumes/Disk1-14/DrivePool/Media/Plex/Music/Explicit"
     write_to_global_music = True
-    overwrite_songs = True
-    download_full_album = True
+    overwrite_songs = False
+    download_full_album = False
 
     options = {
         "output": output_dir,
@@ -43,9 +43,8 @@ def run_programmatically():
     if overwrite_songs:
         options["overwrite"] = True
 
-    if write_to_global_music:
+    if write_to_global_music: #customOptions.OPTION_OVERWRITE_OUTPUT_DIR
         options["overwrite_output_dir"] = "MyLikedSongs"
-#     output_dir = "/Volumes/Disk1-14/DrivePool/Media/Plex/Music/Explicit"
 
     if download_full_album:
         options[customOptions.OPTION_DOWNLOAD_FULL_ALBUM_FROM_SONG] = True

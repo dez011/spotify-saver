@@ -70,6 +70,54 @@ class YouTubeDownloaderForCLI(YouTubeDownloader):
         except Exception:
             return "", ""
 
+    def _option(self, custom_options: dict | None, key: str, default=None):
+        custom_options = custom_options or {}
+        return custom_options.get(key, default)
+
+    def _is_overwrite_enabled(self, custom_options: dict | None) -> bool:
+        return bool(self._option(custom_options, customOptions.OPTION_OVERWRITE, False))
+
+    def _output_dir_name(self, default_name: str, custom_options: dict | None) -> str:
+        return self._option(custom_options, customOptions.OPTION_OVERWRITE_OUTPUT_DIR, None) or default_name
+
+    def _prepare_output_dir(self, default_name: str, custom_options: dict | None) -> tuple[Path, str, Path]:
+        original_base_dir = self.base_dir
+        output_dir_name = self._output_dir_name(default_name, custom_options)
+        output_dir = original_base_dir / output_dir_name
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return output_dir, output_dir_name, original_base_dir
+#{'output': './musicTest', 'skip_playlist': {'values': []}, 'overwrite': True, 'overwrite_output_dir': 'MyLikedSongs'}
+    #defaultname MyLikedSongs
+
+    def _handle_existing_track_for_download(
+        self,
+        output_dir: Path,
+        track: Track,
+        custom_options: dict | None,
+        skipped_tracks_to_review: list[Track],
+    ) -> bool:
+        """Return True when the caller should skip this track."""
+        existing_file = self._find_existing_playlist_track_by_metadata(
+            output_dir=output_dir,
+            track=track,
+            skipped_tracks_to_review=skipped_tracks_to_review,
+        )
+
+        if not existing_file:
+            return False
+
+        if self._is_overwrite_enabled(custom_options):
+            try:
+                # existing_file.unlink()
+                print(f"Overwrite delete before download: {track.name} -> {existing_file.name}")
+            except Exception as e:
+                self.logger.error(f"Could not delete existing file {existing_file}: {str(e)}")
+            return False
+
+        print(f"Skip: {track.name}")
+        self.logger.info(f"Skipping existing track: {existing_file.name}")
+        return True
+
     def _audio_file_looks_complete(self, file_path: Path, track: Track) -> bool:
         if not file_path.exists() or not file_path.is_file():
             return False
@@ -140,6 +188,12 @@ class YouTubeDownloaderForCLI(YouTubeDownloader):
             skipped_tracks_to_review.append(track)
             print(f"Re-downloading incomplete existing file: {track.name} -> {incomplete_filename_match}")
             return None
+
+        if fallback_filename_match:
+            skipped_tracks_to_review.append(track)
+            return fallback_filename_match
+
+        return None
 
 
     def download_track_cli(
@@ -223,9 +277,25 @@ class YouTubeDownloaderForCLI(YouTubeDownloader):
             self.logger.error("Álbum no contiene tracks.")
             return 0, 0
 
+        output_dir, output_dir_name, original_base_dir = self._prepare_output_dir(
+            default_name=album.artists[0],
+            custom_options=custom_options,
+        )
+        self.base_dir = output_dir
+        skipped_tracks_to_review = []
+
         success = 0
         for idx, track in enumerate(album.tracks, 1):
             try:
+                if self._handle_existing_track_for_download(
+                    output_dir=output_dir,
+                    track=track,
+                    custom_options=custom_options,
+                    skipped_tracks_to_review=skipped_tracks_to_review,
+                ):
+                    success += 1
+                    continue
+
                 if progress_callback:
                     progress_callback(idx, len(album.tracks), track.name)
 
@@ -247,15 +317,13 @@ class YouTubeDownloaderForCLI(YouTubeDownloader):
 
         # Generar metadatos solo si hay éxitos
         if success > 0:
-            output_dir = self._get_album_dir(album)
+            album_output_dir = self._get_album_dir(album)
             if nfo:
-                NFOGenerator.generate(album, output_dir)
+                NFOGenerator.generate(album, album_output_dir)
             if cover and album.cover_url:
-                self._save_cover_album(album.cover_url, output_dir / "cover.jpg")
+                self._save_cover_album(album.cover_url, album_output_dir / "cover.jpg")
 
-            # Guarda el cover del artista
-            # self._save_artist_cover()
-
+        self.base_dir = original_base_dir
         return success, len(album.tracks)
 
     def download_playlist_cli(
@@ -287,29 +355,23 @@ class YouTubeDownloaderForCLI(YouTubeDownloader):
             self.logger.error("Playlist inválida: sin nombre o tracks vacíos")
             return 0, 0
 
-        custom_options = custom_options or {}
-        override_output_dir = custom_options.get(customOptions.OPTION_OVERWRITE_OUTPUT_DIR)
-        output_dir_name = override_output_dir or playlist.name
-
-        output_dir = self.base_dir / output_dir_name
-        output_dir.mkdir(parents=True, exist_ok=True)
-        self.base_dir = self.base_dir / output_dir_name
-        print("output_dir: " + output_dir.name)
+        output_dir, output_dir_name, original_base_dir = self._prepare_output_dir(
+            default_name=playlist.name,
+            custom_options=custom_options,
+        )
+        self.base_dir = output_dir
+        print("output_dir: " + output_dir.__str__())
         success = 0
         skipped_tracks_to_review = []
 
         for idx, track in enumerate(playlist.tracks, 1):
             try:
-                override_force = custom_options.get(customOptions.OPTION_OVERWRITE, False)
-                existing_file = self._find_existing_playlist_track_by_metadata(
+                if self._handle_existing_track_for_download(
                     output_dir=output_dir,
                     track=track,
+                    custom_options=custom_options,
                     skipped_tracks_to_review=skipped_tracks_to_review,
-                )
-
-                if existing_file and not override_force:
-                    print(f"Skip: {track.name}")
-                    self.logger.info(f"Skipping existing track: {existing_file.name}")
+                ):
                     success += 1
                     continue
 
@@ -318,16 +380,13 @@ class YouTubeDownloaderForCLI(YouTubeDownloader):
 
                 _, updated_track = self.download_track(
                     track,
+                    album_artist=(track.album_artist[0] if track.album_artist else (track.artists[0] if track.artists else "Unknown Artist")),
                     output_format=output_format,
                     bitrate=bitrate,
                     download_lyrics=download_lyrics,
                 )
                 if updated_track:
                     success += 1
-                    newTrackName = self._sanitize_filename(track.name) + existing_file.suffix
-                    # if existing_file and override_force and existing_file.name != newTrackName:
-                    #     existing_file.unlink()
-                    #     print(f"Overwrite delete: -> {existing_file.name}")
 
             except Exception as e:
                 self.logger.error(f"Error en {track.name}: {str(e)}")
@@ -356,4 +415,5 @@ class YouTubeDownloaderForCLI(YouTubeDownloader):
             except Exception as e:
                 self.logger.error(f"Error downloading playlist cover: {str(e)}")
 
+        self.base_dir = original_base_dir
         return success, len(playlist.tracks)
