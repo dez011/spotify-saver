@@ -108,7 +108,7 @@ class YouTubeDownloaderForCLI(YouTubeDownloader):
 
         if self._is_overwrite_enabled(custom_options):
             try:
-                # existing_file.unlink()
+                existing_file.unlink()
                 print(f"Overwrite delete before download: {track.name} -> {existing_file.name}")
             except Exception as e:
                 self.logger.error(f"Could not delete existing file {existing_file}: {str(e)}")

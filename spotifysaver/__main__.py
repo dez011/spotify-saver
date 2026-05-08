@@ -24,7 +24,7 @@ def run_programmatically():
     else:
         output_dir = "/Volumes/Disk1-14/DrivePool/Media/Plex/Music/Explicit"
     write_to_global_music = True
-    overwrite_songs = False
+    overwrite_songs = True #false skips dups
     download_full_album = False
 
     options = {

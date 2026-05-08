@@ -63,6 +63,10 @@ class Track:
         """
         return replace(self, has_lyrics=success)
 
+    def with_track_number(self, number: int) -> "Track":
+        """Return a new Track instance with updated track number."""
+        return replace(self, number=number)
+
     @property
     def lyrics_filename(self) -> str:
         """Generate a safe filename for LRC lyrics files.

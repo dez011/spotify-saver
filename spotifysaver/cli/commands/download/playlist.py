@@ -130,6 +130,19 @@ def process_playlist(spotify: SpotifyAPI, searcher: YoutubeMusicSearcher, downlo
 
         return
 
+    for idx, track in enumerate(playlist.tracks):
+        album_url = _get_album_url_for_track(spotify, track)
+        if not album_url:
+            continue
+
+        album = spotify.get_album(album_url)
+        if not album or not album.tracks:
+            continue
+
+        for album_track in album.tracks:
+            if album_track.name == track.name:
+                playlist.tracks[idx] = track.with_track_number(album_track.number)
+                break
 
     click.secho(f"\nDownloading playlist: {playlist.name}", fg="magenta")
 
