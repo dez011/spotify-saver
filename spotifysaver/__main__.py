@@ -3,6 +3,7 @@ This module serves as the entry point for the SpotifySaver command-line interfac
 """
 
 from spotifysaver.cli import cli
+from spotifysaver.cli.commands.download import customOptions
 from spotifysaver.cli.commands.download.download import run_download
 
 
@@ -24,7 +25,7 @@ def run_programmatically():
         output_dir = "/Volumes/Disk1-14/DrivePool/Media/Plex/Music/Explicit"
     write_to_global_music = True
     overwrite_songs = True
-
+    download_full_album = True
 
     options = {
         "output": output_dir,
@@ -46,6 +47,8 @@ def run_programmatically():
         options["overwrite_output_dir"] = "MyLikedSongs"
 #     output_dir = "/Volumes/Disk1-14/DrivePool/Media/Plex/Music/Explicit"
 
+    if download_full_album:
+        options[customOptions.OPTION_DOWNLOAD_FULL_ALBUM_FROM_SONG] = True
 
     run_download(spotify_url, options)
 

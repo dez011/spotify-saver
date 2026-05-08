@@ -6,9 +6,42 @@ including progress tracking and optional metadata generation.
 
 import click
 
-from spotifysaver.cli.commands.download.customOptions import OPTION_SKIP_PLAYLIST, OPTION_VALUES
+from spotifysaver.cli.commands.download.customOptions import OPTION_SKIP_PLAYLIST, OPTION_VALUES, \
+    OPTION_DOWNLOAD_FULL_ALBUM_FROM_SONG
 from spotifysaver.downloader import YouTubeDownloader, YouTubeDownloaderForCLI
 from spotifysaver.services import SpotifyAPI, YoutubeMusicSearcher, ScoreMatchCalculator
+from spotifysaver.cli.commands.download.album import process_album
+
+
+def _get_album_url_for_track(spotify: SpotifyAPI, track):
+    """Resolve a playlist Track to its Spotify album URL using the track URI."""
+    track_uri = getattr(track, "uri", None)
+    if not track_uri:
+        return None
+
+    raw_track = None
+
+    if hasattr(spotify, "client") and hasattr(spotify.client, "track"):
+        raw_track = spotify.client.track(track_uri)
+    elif hasattr(spotify, "sp") and hasattr(spotify.sp, "track"):
+        raw_track = spotify.sp.track(track_uri)
+    elif hasattr(spotify, "spotify") and hasattr(spotify.spotify, "track"):
+        raw_track = spotify.spotify.track(track_uri)
+
+    if not raw_track:
+        return None
+
+    album = raw_track.get("album") or {}
+    external_urls = album.get("external_urls") or {}
+    album_url = external_urls.get("spotify")
+    if album_url:
+        return album_url
+
+    album_id = album.get("id")
+    if album_id:
+        return f"https://open.spotify.com/album/{album_id}"
+
+    return None
 
 
 def process_playlist(spotify: SpotifyAPI, searcher: YoutubeMusicSearcher, downloader: YouTubeDownloaderForCLI, url,
@@ -40,6 +73,63 @@ def process_playlist(spotify: SpotifyAPI, searcher: YoutubeMusicSearcher, downlo
         skip_playlist_names = skip_playlist_option or []
 
     playlist = spotify.get_playlist(url)
+
+    download_full_album_from_song = bool(
+        custom_options.get(OPTION_DOWNLOAD_FULL_ALBUM_FROM_SONG, False)
+    )
+
+    if download_full_album_from_song:
+        album_urls_by_album = {}
+        missing_album_tracks = []
+
+        for track in playlist.tracks:
+            album_url = _get_album_url_for_track(spotify, track)
+            if not album_url:
+                missing_album_tracks.append(track)
+                continue
+
+            album_urls_by_album.setdefault(album_url, []).append(track)
+
+        if missing_album_tracks:
+            click.secho(
+                f"\n⚠ Could not resolve album for {len(missing_album_tracks)} track(s).",
+                fg="yellow",
+            )
+            for track in missing_album_tracks[:10]:
+                click.echo(f"  - {track.name} / {track.album_name}")
+
+        if not album_urls_by_album:
+            click.secho("\n⚠ No albums resolved from playlist tracks.", fg="yellow")
+            return
+
+        click.secho(
+            f"\nDownloading {len(album_urls_by_album)} unique album(s) from playlist tracks",
+            fg="magenta",
+        )
+
+        for album_url, tracks_from_album in album_urls_by_album.items():
+            sample_track = tracks_from_album[0]
+            click.echo(
+                f"\nAlbum from playlist track: {sample_track.album_name} "
+                f"({len(tracks_from_album)} playlist track(s) matched)"
+            )
+            process_album(
+                spotify,
+                searcher,
+                downloader,
+                album_url,
+                lyrics,
+                nfo,
+                cover,
+                output_format,
+                bitrate,
+                False,
+                dry_run,
+            )
+
+        return
+
+
     click.secho(f"\nDownloading playlist: {playlist.name}", fg="magenta")
 
     if playlist.name in skip_playlist_names:
