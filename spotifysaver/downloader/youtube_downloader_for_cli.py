@@ -321,7 +321,6 @@ class YouTubeDownloaderForCLI(YouTubeDownloader):
 
                 _, updated_track = self.download_track(
                     track,
-                    album_artist=track.album_artist.__str__(),
                     output_format=output_format,
                     bitrate=bitrate,
                     download_lyrics=download_lyrics,

@@ -72,15 +72,128 @@ class YoutubeMusicSearcher:
         )
         return " ".join([w for w in text.split() if w not in {"lyrics", "audio"}])
 
+    @staticmethod
+    def _result_text(result: Dict) -> str:
+        artist_names = " ".join(
+            artist.get("name", "") for artist in result.get("artists", []) if isinstance(artist, dict)
+        )
+        album_name = ""
+        album = result.get("album")
+        if isinstance(album, dict):
+            album_name = album.get("name", "")
+
+        return " ".join(
+            str(value or "")
+            for value in [
+                result.get("title", ""),
+                artist_names,
+                album_name,
+            ]
+        ).lower()
+
+    @staticmethod
+    def _looks_clean_result(result: Dict) -> bool:
+        text = YoutubeMusicSearcher._result_text(result)
+        clean_terms = (
+            "clean",
+            "clean version",
+            "radio edit",
+            "edited",
+            "censored",
+            "censor",
+            "no explicit",
+        )
+        return any(term in text for term in clean_terms)
+
+    @staticmethod
+    def _looks_explicit_result(result: Dict) -> bool:
+        text = YoutubeMusicSearcher._result_text(result)
+        explicit_terms = (
+            "explicit",
+            "uncensored",
+            "dirty",
+            "dirty version",
+            "album version",
+        )
+        return any(term in text for term in explicit_terms)
+
+    @staticmethod
+    def _track_prefers_clean(track: Track) -> bool:
+        track_text = f"{track.name or ''} {track.album_name or ''}".lower()
+        return any(term in track_text for term in ("clean", "radio edit", "edited", "censored"))
+
+    def _score_version_preference(self, score: float, result: Dict, track: Track) -> float:
+        """Adjust score so clean and explicit variants are searched, but preferred intentionally."""
+        prefers_clean = self._track_prefers_clean(track)
+        looks_clean = self._looks_clean_result(result)
+        looks_explicit = self._looks_explicit_result(result)
+
+        adjusted_score = score
+        if prefers_clean:
+            if looks_clean:
+                adjusted_score += 15
+            if looks_explicit:
+                adjusted_score -= 25
+        else:
+            # Default behavior: prefer explicit/uncensored versions and avoid clean/radio edits.
+            if looks_explicit:
+                adjusted_score += 15
+            if looks_clean:
+                adjusted_score -= 35
+
+        return adjusted_score
+
+    def _dedupe_results(self, results: List[Dict]) -> List[Dict]:
+        deduped = []
+        seen = set()
+
+        for result in results:
+            video_id = result.get("videoId")
+            dedupe_key = video_id or f"{result.get('title')}::{self._result_text(result)}"
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            deduped.append(result)
+
+        return deduped
+
+    def _search_song_variants(
+        self,
+        base_query: str,
+        limit_per_query: int,
+        ignore_spelling: bool,
+    ) -> List[Dict]:
+        """Search base, explicit, and clean variants so scoring can choose the correct version."""
+        queries = [
+            base_query,
+            f"{base_query} explicit",
+            f"{base_query} uncensored",
+            f"{base_query} clean",
+            f"{base_query} radio edit",
+        ]
+
+        combined_results = []
+        for query in queries:
+            results = self.ytmusic.search(
+                query=query,
+                filter="songs",
+                limit=limit_per_query,
+                ignore_spelling=ignore_spelling,
+            )
+            self.logger.debug(f"Song variant search query='{query}' results={results}")
+            combined_results.extend(results or [])
+
+        return self._dedupe_results(combined_results)
+
     def _search_with_fallback(self, track: Track) -> Optional[str]:
         """Prioritized search strategy with multiple fallback methods.
-        
+
         Tries different search strategies in order of reliability until
         a match is found.
-        
+
         Args:
             track: Track object to search for
-            
+
         Returns:
             str: YouTube Music URL if found, None otherwise
         """
@@ -101,32 +214,31 @@ class YoutubeMusicSearcher:
 
     def _search_exact_match(self, track: Track) -> Optional[str]:
         """Exact search with song filter.
-        
+
         Args:
             track: Track object to search for
-            
+
         Returns:
             str: YouTube Music URL if found, None otherwise
         """
         query = self._normalize(f"{track.artists[0]} {track.name} {track.album_name}")
-        results = self.ytmusic.search(
-            query=query,
-            filter="songs",
-            limit=5,
-            ignore_spelling=True
+        results = self._search_song_variants(
+            base_query=query,
+            limit_per_query=5,
+            ignore_spelling=True,
         )
-        self.logger.debug(f"Exact match search results: {results}")
+        self.logger.debug(f"Exact match combined search results: {results}")
         return self._process_results(results, track, strict=True)
 
     def _search_album_context(self, track: Track) -> Optional[str]:
         """Search for the album with detailed error handling.
-        
+
         Args:
             track: Track object to search for
-            
+
         Returns:
             str: YouTube Music URL if found, None otherwise
-            
+
         Raises:
             AlbumNotFoundError: If the album cannot be found
             InvalidResultError: If the API returns invalid data
@@ -168,18 +280,17 @@ class YoutubeMusicSearcher:
 
     def _search_fuzzy_match(self, track: Track) -> Optional[str]:
         """More flexible search when exact searches fail.
-        
+
         Args:
             track: Track object to search for
-            
+
         Returns:
             str: YouTube Music URL if found, None otherwise
         """
-        results = self.ytmusic.search(
-            query=self._normalize(f"{track.artists[0]} {track.name} {track.album_name}"),
-            filter="songs",
-            limit=10,
-            ignore_spelling=False,  # Allow spelling corrections
+        results = self._search_song_variants(
+            base_query=self._normalize(f"{track.artists[0]} {track.name} {track.album_name}"),
+            limit_per_query=10,
+            ignore_spelling=False,
         )
         return self._process_results(results, track, strict=False)
 
@@ -187,12 +298,12 @@ class YoutubeMusicSearcher:
         self, results: List[Dict], track: Track, strict: bool
     ) -> Optional[str]:
         """Evaluate and select the best result.
-        
+
         Args:
             results: List of search results from YouTube Music
             track: Original track to match against
             strict: Whether to use strict matching criteria
-            
+
         Returns:
             str: YouTube Music URL of the best match, None if no valid matches
         """
@@ -202,10 +313,13 @@ class YoutubeMusicSearcher:
 
         scored_results = []
         for result in results:
-            score = self.scorer._calculate_match_score(result, track, strict)
-            self.logger.debug(f"Score for {result.get('title', 'Unknown')} is {score}")
-            if score > 0:
-                scored_results.append((score, result))
+            base_score = self.scorer._calculate_match_score(result, track, strict)
+            adjusted_score = self._score_version_preference(base_score, result, track)
+            self.logger.debug(
+                f"Score for {result.get('title', 'Unknown')} is {base_score}; adjusted version score is {adjusted_score}"
+            )
+            if adjusted_score > 0:
+                scored_results.append((adjusted_score, result))
 
         if not scored_results:
             self.logger.warning(f"No valid matches found for {track.name} by {track.artists[0]}")
