@@ -125,6 +125,7 @@ def process_playlist(spotify: SpotifyAPI, searcher: YoutubeMusicSearcher, downlo
                 bitrate,
                 False,
                 dry_run,
+                custom_options,
             )
 
         return

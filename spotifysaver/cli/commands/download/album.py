@@ -20,7 +20,8 @@ def process_album(
         output_format, 
         bitrate, 
         explain=False,
-        dry_run=False
+        dry_run=False,
+        custom_options=None,
         ):
     """Process and download a complete Spotify album with progress tracking.
     
@@ -113,6 +114,7 @@ def process_album(
             nfo=nfo,
             cover=cover,
             progress_callback=update_progress,
+            custom_options=custom_options,
         )
 
     # Display summary

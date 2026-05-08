@@ -202,6 +202,7 @@ class YouTubeDownloaderForCLI(YouTubeDownloader):
         nfo: bool = False,  # Generate NFO
         cover: bool = False,  # Download cover art
         progress_callback: Optional[callable] = None,  # Progress callback
+        custom_options=None,
     ) -> tuple[int, int]:  # Returns (success, total)
         """Download a complete album with progress support.
 
@@ -300,10 +301,6 @@ class YouTubeDownloaderForCLI(YouTubeDownloader):
         for idx, track in enumerate(playlist.tracks, 1):
             try:
                 override_force = custom_options.get(customOptions.OPTION_OVERWRITE, False)
-                existing_file = None
-                # if override_force:
-                #     existing_file = False
-                # else:
                 existing_file = self._find_existing_playlist_track_by_metadata(
                     output_dir=output_dir,
                     track=track,
