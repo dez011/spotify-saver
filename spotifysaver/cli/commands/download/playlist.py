@@ -58,7 +58,6 @@ def process_playlist(spotify: SpotifyAPI, searcher: YoutubeMusicSearcher, downlo
                 output_dir=output_dir,
                 track=track,
                 skipped_tracks_to_review=skipped_tracks_to_review,
-                skip_playlist_names=skip_playlist_names,
             )
 
             click.secho(f"\n🎵 Track: {track.name}", fg="yellow")
@@ -75,9 +74,17 @@ def process_playlist(spotify: SpotifyAPI, searcher: YoutubeMusicSearcher, downlo
 
             result = searcher.search_track(track)
             explanation = scorer.explain_score(result, track, strict=True)
-            click.echo(f"    Selected candidate: {explanation['yt_title']}")
-            click.echo(f"    Video ID: {explanation['yt_videoId']}")
-            click.echo(f"    Total score: {explanation['total_score']} (passed: {explanation['passed']})")
+            selected_candidate = explanation.get("yt_title") or explanation.get("title") or "No candidate returned"
+            video_id = explanation.get("yt_videoId") or explanation.get("videoId") or "N/A"
+            total_score = explanation.get("total_score", "N/A")
+            passed = explanation.get("passed", False)
+
+            click.echo(f"    Selected candidate: {selected_candidate}")
+            click.echo(f"    Video ID: {video_id}")
+            click.echo(f"    Total score: {total_score} (passed: {passed})")
+
+            if selected_candidate == "No candidate returned":
+                click.echo(f"    Raw explanation: {explanation}")
         return
 
     # Configure progress bar

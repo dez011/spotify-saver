@@ -182,17 +182,24 @@ class YouTubeDownloader:
         Returns:
             Path: Complete file path where the track should be saved
         """
-        artist_name = (
-            album_artist or track.artists[0] if track.artists else "Unknown Artist"
-        )
-        artist_name = self._sanitize_filename(artist_name)
+        folder_artist = album_artist or (track.album_artist[0] if track.album_artist else None)
+        if not folder_artist:
+            folder_artist = track.artists[0] if track.artists else "Unknown Artist"
+        if isinstance(folder_artist, list):
+            folder_artist = ", ".join(str(artist) for artist in folder_artist)
+        folder_artist = self._sanitize_filename(str(folder_artist))
+
+        track_artist = ", ".join(str(artist) for artist in (track.artists or [])) or "Unknown Artist"
+        track_artist = self._sanitize_filename(track_artist)
+
         album_name = self._sanitize_filename(track.album_name or "Unknown Album")
         year = track.release_date[:4] if track.release_date else "Unknown"
-        dir_path = self.base_dir / artist_name / f"{album_name} ({year})"
+        dir_path = self.base_dir / folder_artist / f"{album_name} ({year})"
 
         dir_path.mkdir(parents=True, exist_ok=True)
         track_name = self._sanitize_filename(track.name or "Unknown Track")
-        return dir_path / f"{track.number} - {artist_name} - {track_name}.{output_format.value}"
+        track_number = str(track.number or 0).zfill(2)
+        return dir_path / f"{track_number} - {track_artist} - {track_name}.{output_format.value}"
 
     def _download_cover(self, track: Track) -> Optional[bytes]:
         """Download cover art from Spotify.

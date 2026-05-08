@@ -14,10 +14,20 @@ def run_programmatically():
 
     # ===== CONFIGURE THESE =====
     command = "download"  # options: download, inspect, init, etc.
+    testing = True
     spotify_url = "https://open.spotify.com/playlist/3eA5dShYiEIkczx6jyGsHA?si=a35d0623174c4ab8"
+    output_dir = None
+
+    if testing:
+        output_dir = "./musicTest"
+    else:
+        output_dir = "/Volumes/Disk1-14/DrivePool/Media/Plex/Music/Explicit"
+    write_to_global_music = True
+    overwrite_songs = True
+
 
     options = {
-        "output": "./musicTest",
+        "output": output_dir,
         "skip_playlist": {
             "values": [
                 # "SomeOldPlaylist",
@@ -28,9 +38,13 @@ def run_programmatically():
         # "format": "mp3",
         # "quality": "320",
         # "dry_run": True,
-        "overwrite": True,
     }
+    if overwrite_songs:
+        options["overwrite"] = True
 
+    if write_to_global_music:
+        options["overwrite_output_dir"] = "MyLikedSongs"
+#     output_dir = "/Volumes/Disk1-14/DrivePool/Media/Plex/Music/Explicit"
 
 
     run_download(spotify_url, options)
