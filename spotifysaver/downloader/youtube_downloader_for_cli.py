@@ -95,12 +95,14 @@ class YouTubeDownloaderForCLI(YouTubeDownloader):
         track: Track,
         custom_options: dict | None,
         skipped_tracks_to_review: list[Track],
+        album: Album = None,
     ) -> bool:
         """Return True when the caller should skip this track."""
         existing_file = self._find_existing_playlist_track_by_metadata(
             output_dir=output_dir,
             track=track,
             skipped_tracks_to_review=skipped_tracks_to_review,
+            album=album,
         )
 
         if not existing_file:
@@ -148,21 +150,23 @@ class YouTubeDownloaderForCLI(YouTubeDownloader):
         output_dir: Path,
         track: Track,
         skipped_tracks_to_review: list[Track],
+        album: Album = None,
     ) -> Optional[Path]:
         expected_title = self._normalize_match_text(track.name)
         expected_artists = [self._normalize_match_text(artist) for artist in (track.artists or [])]
 
         fallback_filename_match = None
         incomplete_filename_match = None
+        # output_path = self._get_output_path(track, album.artists[0])
 
         for file_path in self._audio_files_under(output_dir):
             normalized_file_stem = self._normalize_match_text(file_path.stem)
             filename_title_matches = expected_title and expected_title in normalized_file_stem
 
-            if not self._audio_file_looks_complete(file_path, track):
-                if filename_title_matches:
-                    incomplete_filename_match = incomplete_filename_match or file_path
-                continue
+            # if not self._audio_file_looks_complete(file_path, track):
+            #     if filename_title_matches:
+            #         incomplete_filename_match = incomplete_filename_match or file_path
+            #     continue
 
             tag_title, tag_artist = self._read_audio_tags_for_match(file_path)
             normalized_tag_title = self._normalize_match_text(tag_title)
@@ -184,10 +188,10 @@ class YouTubeDownloaderForCLI(YouTubeDownloader):
             if filename_title_matches:
                 fallback_filename_match = fallback_filename_match or file_path
 
-        if incomplete_filename_match:
-            skipped_tracks_to_review.append(track)
-            print(f"Re-downloading incomplete existing file: {track.name} -> {incomplete_filename_match}")
-            return None
+        # if incomplete_filename_match:
+        #     skipped_tracks_to_review.append(track)
+        #     print(f"Re-downloading incomplete existing file: {track.name} -> {incomplete_filename_match}")
+        #     return None
 
         if fallback_filename_match:
             skipped_tracks_to_review.append(track)
@@ -292,6 +296,7 @@ class YouTubeDownloaderForCLI(YouTubeDownloader):
                     track=track,
                     custom_options=custom_options,
                     skipped_tracks_to_review=skipped_tracks_to_review,
+                    album=album,
                 ):
                     success += 1
                     continue

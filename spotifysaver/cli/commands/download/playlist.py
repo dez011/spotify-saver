@@ -5,12 +5,220 @@ including progress tracking and optional metadata generation.
 """
 
 import click
+import json
+from pathlib import Path
 
 from spotifysaver.cli.commands.download.customOptions import OPTION_SKIP_PLAYLIST, OPTION_VALUES, \
     OPTION_DOWNLOAD_FULL_ALBUM_FROM_SONG
 from spotifysaver.downloader import YouTubeDownloader, YouTubeDownloaderForCLI
 from spotifysaver.services import SpotifyAPI, YoutubeMusicSearcher, ScoreMatchCalculator
 from spotifysaver.cli.commands.download.album import process_album
+
+
+def _safe_nsp_filename(name: str) -> str:
+    return "".join(ch if ch.isalnum() or ch in (" ", "-", "_") else "_" for ch in name).strip()
+
+
+# Helper for safe music path parts (for m3u8, etc.)
+def _safe_music_path_part(value: str) -> str:
+    value = str(value or "").strip()
+    for bad_char in '<>:"/\\|?*':
+        value = value.replace(bad_char, "_")
+    return " ".join(value.split()).strip(". ")
+
+
+# Path and file helpers for fuzzy matching
+def _normalize_path_match_text(value: str) -> str:
+    return " ".join(str(value or "").lower().replace("_", " ").replace("-", " ").split())
+
+
+def _audio_files_under(path: Path):
+    audio_extensions = {".m4a", ".mp3", ".flac", ".opus", ".ogg", ".aac", ".wav"}
+    if not path.exists():
+        return
+
+    for file_path in path.rglob("*"):
+        if file_path.is_file() and file_path.suffix.lower() in audio_extensions:
+            yield file_path
+
+
+def _spotify_track_to_nsp_rule(track):
+    if not getattr(track, "artists", None) or not getattr(track, "name", None):
+        return None
+
+    return {
+        "all": [
+            {"is": {"artist": track.artists[0]}},
+            {"is": {"title": track.name}},
+        ]
+    }
+
+
+# Helpers for m3u8/NSP playlist generation
+def _track_to_m3u8_path(track, root_folder_name: str) -> str | None:
+    if not getattr(track, "name", None):
+        return None
+
+    folder_artist = None
+    if getattr(track, "album_artist", None):
+        folder_artist = track.album_artist[0]
+    elif getattr(track, "artists", None):
+        folder_artist = track.artists[0]
+
+    if not folder_artist:
+        folder_artist = "Unknown Artist"
+
+    track_artist = ", ".join(str(artist) for artist in (getattr(track, "artists", None) or [])) or "Unknown Artist"
+    album_name = getattr(track, "album_name", None) or "Unknown Album"
+    year = str(getattr(track, "release_date", "") or "Unknown")[:4]
+    track_number = str(getattr(track, "number", None) or 0).zfill(2)
+
+    return "/".join(
+        [
+            _safe_music_path_part(root_folder_name),
+            _safe_music_path_part(folder_artist),
+            f"{_safe_music_path_part(album_name)} ({_safe_music_path_part(year)})",
+            f"{track_number} - {_safe_music_path_part(track_artist)} - {_safe_music_path_part(track.name)}.m4a",
+        ]
+    )
+
+
+# Helper to resolve actual m3u8 path for a track, searching if needed
+def _resolve_existing_m3u8_path(track, music_library_dir, root_folder_name: str) -> str | None:
+    expected_relative_path = _track_to_m3u8_path(track, root_folder_name=root_folder_name)
+    if not expected_relative_path:
+        return None
+
+    if not music_library_dir:
+        return expected_relative_path
+
+    music_library_dir = Path(music_library_dir)
+    expected_absolute_path = music_library_dir / expected_relative_path
+    if expected_absolute_path.exists():
+        return expected_relative_path
+
+    search_root = music_library_dir / _safe_music_path_part(root_folder_name)
+    if not search_root.exists():
+        search_root = music_library_dir
+
+    expected_title = _normalize_path_match_text(getattr(track, "name", ""))
+    expected_artists = [
+        _normalize_path_match_text(artist)
+        for artist in (getattr(track, "artists", None) or [])
+    ]
+
+    for file_path in _audio_files_under(search_root):
+        normalized_file_text = _normalize_path_match_text(file_path.stem)
+        title_matches = expected_title and expected_title in normalized_file_text
+        artist_matches = not expected_artists or any(
+            artist and artist in normalized_file_text for artist in expected_artists
+        )
+
+        if title_matches and artist_matches:
+            return file_path.relative_to(music_library_dir).as_posix()
+
+    return None
+
+
+def _append_playlist_rules_and_paths(
+    playlist,
+    nsp_rules: list,
+    m3u8_lines: list,
+    root_folder_name: str,
+    music_library_dir=None,
+    missing_m3u8_tracks: list | None = None,
+):
+    m3u8_lines.append(f"# Spotify playlist: {playlist.name}")
+
+    for track in playlist.tracks:
+        rule = _spotify_track_to_nsp_rule(track)
+        if rule:
+            rule["_spotify_playlist"] = playlist.name
+            nsp_rules.append(rule)
+
+        m3u8_path = _resolve_existing_m3u8_path(
+            track=track,
+            music_library_dir=music_library_dir,
+            root_folder_name=root_folder_name,
+        )
+        if m3u8_path:
+            m3u8_lines.append(m3u8_path)
+        elif missing_m3u8_tracks is not None:
+            missing_m3u8_tracks.append(track)
+
+    m3u8_lines.append("")
+
+
+def generate_nsp_playlist_flow(
+    spotify: SpotifyAPI,
+    playlist_url: str | list[str],
+    output_dir,
+    merged_playlist_name: str = "MergedSpotifyPlaylists",
+    m3u8_root_folder_name: str | None = None,
+    music_library_dir=None,
+) -> tuple[Path, Path]:
+    playlist_urls = playlist_url if isinstance(playlist_url, list) else [playlist_url]
+    playlists = [spotify.get_playlist(url) for url in playlist_urls]
+    playlists = [playlist for playlist in playlists if playlist]
+
+    if not playlists:
+        raise ValueError("No Spotify playlists found for NSP/M3U8 generation")
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    merged = len(playlists) > 1
+    playlist_file_name = merged_playlist_name if merged else playlists[0].name
+    root_folder_name = m3u8_root_folder_name or playlist_file_name
+
+    nsp_rules = []
+    m3u8_lines = ["#EXTM3U"]
+    missing_m3u8_tracks = []
+
+    for playlist in playlists:
+        _append_playlist_rules_and_paths(
+            playlist=playlist,
+            nsp_rules=nsp_rules,
+            m3u8_lines=m3u8_lines,
+            root_folder_name=root_folder_name,
+            music_library_dir=music_library_dir,
+            missing_m3u8_tracks=missing_m3u8_tracks,
+        )
+
+    nsp_data = {
+        "_comment": "Generated from Spotify playlist(s). _spotify_playlist fields show source playlist names.",
+        "_spotify_playlists": [playlist.name for playlist in playlists],
+        "any": nsp_rules,
+    }
+
+    base_name = _safe_nsp_filename(playlist_file_name)
+    nsp_path = output_dir / f"{base_name}.nsp"
+    m3u8_path = output_dir / f"{base_name}.m3u8"
+
+    nsp_path.write_text(json.dumps(nsp_data, indent=2, ensure_ascii=False), encoding="utf-8")
+    m3u8_path.write_text("\n".join(m3u8_lines), encoding="utf-8")
+
+    click.secho(
+        f"\n✔ Generated NSP smart playlist with {len(nsp_rules)} rule(s): {nsp_path}",
+        fg="green",
+    )
+    click.secho(
+        f"✔ Generated M3U8 playlist with {len(nsp_rules)} track path(s): {m3u8_path}",
+        fg="green",
+    )
+
+    if missing_m3u8_tracks:
+        missing_path = output_dir / f"{base_name}-missing-m3u8-tracks.txt"
+        missing_path.write_text(
+            "\n".join(repr(track) for track in missing_m3u8_tracks),
+            encoding="utf-8",
+        )
+        click.secho(
+            f"⚠ M3U8 skipped {len(missing_m3u8_tracks)} missing track(s). Report: {missing_path}",
+            fg="yellow",
+        )
+
+    return nsp_path, m3u8_path
 
 
 def _get_album_url_for_track(spotify: SpotifyAPI, track):
