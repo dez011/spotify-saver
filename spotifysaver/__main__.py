@@ -18,22 +18,25 @@ def run_programmatically():
     # ===== CONFIGURE THESE =====
     myLiked = "https://open.spotify.com/playlist/3eA5dShYiEIkczx6jyGsHA?si=a35d0623174c4ab8"
     japanese_kidsSongs = 'https://open.spotify.com/playlist/3fW5PULDGc41NYr6XrhuKU?si=sEOvVBh-Q6ezyX9g830Hjg&pi=9A0ef4HsTY6cB'
-    mix90s = 'https://open.spotify.com/playlist/37i9dQZF1EQn2GRFTFMl2A?si=WW0GT4ccRJ-lAHK-aI2s2A&pi=JNPbGSHHQe2pf'
-    mix00s = 'https://open.spotify.com/playlist/37i9dQZF1DWTUoU0bd0p84?si=A2DWcHcUR6yl2JeFd5egyQ&pi=5C88fZF8SKe13'
+    mix90s00s = "https://open.spotify.com/playlist/3bWsQvhklcGg0BGW1OJw3K?si=58dd380d74174334"
     mixMex = 'https://open.spotify.com/playlist/37i9dQZF1DXbdrcAZnP3Cy?si=V5Swm6SeR0K1_a8X-wzYqQ&pi=I9LmuZAUSaC_5'
-    corridoMix = "https://open.spotify.com/playlist/1wGxIEQHkMv6ZJCh1Nw4uc?si=2f4cdd40b14b4aa6"
-    anpanmix = "https://open.spotify.com/playlist/06R4Lr3NLcZoL6pDYE77Zi?si=46bb7d1f66c34757"
-    disneyMix = "https://open.spotify.com/playlist/7iwn94y55JHOD1Wk87hfuY?si=e19323260ca44d22"
+    # corridoMix = "https://open.spotify.com/playlist/1wGxIEQHkMv6ZJCh1Nw4uc?si=2f4cdd40b14b4aa6"
+    # anpanmix = "https://open.spotify.com/playlist/06R4Lr3NLcZoL6pDYE77Zi?si=46bb7d1f66c34757"
+    # disneyMix = "https://open.spotify.com/playlist/7iwn94y55JHOD1Wk87hfuY?si=e19323260ca44d22"
+    hypeRunningRapMix = "https://open.spotify.com/playlist/2Dj4kbD9PqKAD1h0ChpXpb?si=333cd83fc65f4f18"
+    japaneseClassics = "https://open.spotify.com/playlist/6z0WMXQyfzlcUJZv5oxKb2?si=1cc0986cfa3b4b6c"
+
+
     command = "download"  # options: download, inspect, init, etc.
 
     testing = False
-    spotify_url = corridoMix
+    spotify_url = hypeRunningRapMix
     spotify_playlist_urls = [
         # corridoMix,
         # mix90s,
         # myLiked,
-        anpanmix,
-        disneyMix
+        # anpanmix,
+        # disneyMix
     ]
     write_to_global_music = True
     overwrite_songs = False #false skips dups
