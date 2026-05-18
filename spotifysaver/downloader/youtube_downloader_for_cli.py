@@ -98,27 +98,56 @@ class YouTubeDownloaderForCLI(YouTubeDownloader):
         album: Album = None,
     ) -> bool:
         """Return True when the caller should skip this track."""
-        existing_file = self._find_existing_playlist_track_by_metadata(
+        expected_file = self._expected_download_path_for_track(
             output_dir=output_dir,
             track=track,
-            skipped_tracks_to_review=skipped_tracks_to_review,
             album=album,
         )
 
-        if not existing_file:
-            return False
+        if expected_file:
+            self.logger.info(f"Expected existing-file check path: {expected_file}")
+            if self._audio_file_looks_complete(expected_file, track):
+                if self._is_overwrite_enabled(custom_options):
+                    try:
+                        expected_file.unlink()
+                        print(f"Overwrite delete before download: {track.name} -> {expected_file.name}")
+                    except Exception as e:
+                        self.logger.error(f"Could not delete existing file {expected_file}: {str(e)}")
+                    return False
 
-        if self._is_overwrite_enabled(custom_options):
-            try:
-                existing_file.unlink()
-                print(f"Overwrite delete before download: {track.name} -> {existing_file.name}")
-            except Exception as e:
-                self.logger.error(f"Could not delete existing file {existing_file}: {str(e)}")
-            return False
+                print(f"Skip: {track.name}")
+                self.logger.info(f"Skipping existing track at expected path: {expected_file.name}")
+                return True
 
-        print(f"Skip: {track.name}")
-        self.logger.info(f"Skipping existing track: {existing_file.name}")
-        return True
+        return False
+
+    def _expected_download_path_for_track(
+        self,
+        output_dir: Path,
+        track: Track,
+        album: Album = None,
+    ) -> Optional[Path]:
+        artist_name = None
+        if album and getattr(album, "artists", None):
+            artist_name = album.artists[0]
+        elif getattr(track, "album_artist", None):
+            artist_name = track.album_artist[0]
+        elif getattr(track, "artists", None):
+            artist_name = track.artists[0]
+
+        if not artist_name:
+            artist_name = "Unknown Artist"
+
+        try:
+            output_path = self._get_output_path(track, artist_name)
+        except Exception as e:
+            self.logger.warning(f"Could not build expected output path for {track.name}: {str(e)}")
+            return None
+
+        if output_path.is_absolute():
+            return output_path
+
+        return output_dir / output_path
 
     def _audio_file_looks_complete(self, file_path: Path, track: Track) -> bool:
         if not file_path.exists() or not file_path.is_file():
@@ -145,7 +174,56 @@ class YouTubeDownloaderForCLI(YouTubeDownloader):
         except Exception:
             return False
 
+    # python
     def _find_existing_playlist_track_by_metadata(
+            self,
+            output_dir: Path,
+            track: Track,
+            skipped_tracks_to_review: list[Track],
+            album: Album = None,
+    ) -> Optional[Path]:
+        expected_title = self._normalize_match_text(track.name)
+        expected_artists = [self._normalize_match_text(artist) for artist in (track.artists or [])]
+
+        # Fallback only. The exact expected file path is checked before this method.
+        # Do not recursively scan the whole playlist folder here; that makes each track painfully slow.
+        candidate_dirs = []
+
+        fallback_filename_match = None
+
+        for candidate_dir in candidate_dirs:
+            for file_path in candidate_dir.rglob("*"):
+                if not file_path.is_file():
+                    continue
+                normalized_file_stem = self._normalize_match_text(file_path.stem)
+                filename_title_matches = expected_title and expected_title in normalized_file_stem
+
+                tag_title, tag_artist = self._read_audio_tags_for_match(file_path)
+                normalized_tag_title = self._normalize_match_text(tag_title)
+                normalized_tag_artist = self._normalize_match_text(tag_artist)
+
+                title_matches = normalized_tag_title == expected_title
+                artist_matches = not expected_artists or any(
+                    artist and artist in normalized_tag_artist for artist in expected_artists
+                )
+
+                if title_matches and artist_matches:
+                    if file_path.stem.lower() != self._sanitize_filename(track.name).lower():
+                        skipped_tracks_to_review.append(track)
+                    return file_path
+
+                if title_matches and not artist_matches:
+                    skipped_tracks_to_review.append(track)
+
+                if filename_title_matches:
+                    fallback_filename_match = fallback_filename_match or file_path
+
+        if fallback_filename_match:
+            skipped_tracks_to_review.append(track)
+            return fallback_filename_match
+
+        return None
+    def _find_existing_playlist_track_by_metadata2(
         self,
         output_dir: Path,
         track: Track,
